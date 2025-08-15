@@ -1,0 +1,71 @@
+version: "3.9"
+
+services:
+  # Reverse proxy: เปิดพอร์ตเดียว 11380
+  nginx:
+    build: ./infra/nginx
+    depends_on:
+      - web
+      - phpmyadmin
+    ports:
+      - "11380:80"
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  # PHP + Apache (ไม่ใช้ bind mount เพื่อเลี่ยงปัญหา mounts denied บน Desktop)
+  web:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # เผื่ออยากอ่านค่าใน PHP
+      APP_ENV: production
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  # phpMyAdmin หลัง reverse proxy ที่ /pma/
+  phpmyadmin:
+    image: phpmyadmin:latest
+    environment:
+      PMA_HOST: db
+      PMA_USER: ${MYSQL_USER}
+      PMA_PASSWORD: ${MYSQL_PASSWORD}
+      UPLOAD_LIMIT: 64M
+      PMA_ABSOLUTE_URI: /pma/
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  # MySQL 8
+  db:
+    image: mysql:8.0
+    command: --default-authentication-plugin=caching_sha2_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -u$$MYSQL_USER -p$$MYSQL_PASSWORD -h 127.0.0.1 --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - appnet
+
+volumes:
+  db_data:
+
+networks:
+  appnet:
